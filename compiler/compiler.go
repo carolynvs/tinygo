@@ -30,18 +30,24 @@ func init() {
 
 // Configure the compiler.
 type Config struct {
-	Triple    string   // LLVM target triple, e.g. x86_64-unknown-linux-gnu (empty string means default)
-	CPU       string   // LLVM CPU name, e.g. atmega328p (empty string means default)
-	GOOS      string   //
-	GOARCH    string   //
-	GC        string   // garbage collection strategy
-	CFlags    []string // cflags to pass to cgo
-	LDFlags   []string // ldflags to pass to cgo
-	DumpSSA   bool     // dump Go SSA, for compiler debugging
-	Debug     bool     // add debug symbols for gdb
-	RootDir   string   // GOROOT for TinyGo
-	GOPATH    string   // GOPATH, like `go env GOPATH`
-	BuildTags []string // build tags for TinyGo (empty means {Config.GOOS/Config.GOARCH})
+	Triple     string   // LLVM target triple, e.g. x86_64-unknown-linux-gnu (empty string means default)
+	CPU        string   // LLVM CPU name, e.g. atmega328p (empty string means default)
+	GOOS       string   //
+	GOARCH     string   //
+	GC         string   // garbage collection strategy
+	CFlags     []string // cflags to pass to cgo
+	LDFlags    []string // ldflags to pass to cgo
+	DumpSSA    bool     // dump Go SSA, for compiler debugging
+	Debug      bool     // add debug symbols for gdb
+	RootDir    string   // GOROOT for TinyGo
+	GOPATH     string   // GOPATH, like `go env GOPATH`
+	BuildTags  []string // build tags for TinyGo (empty means {Config.GOOS/Config.GOARCH})
+	TestConfig TestConfig
+}
+
+type TestConfig struct {
+	CompileTestBinary bool
+	// TODO: Filter the test functions to run, include verbose flag, etc
 }
 
 type Compiler struct {
@@ -232,12 +238,13 @@ func (c *Compiler) Compile(mainPath string) error {
 			return err
 		}
 	}
+
 	_, err = lprogram.Import("runtime", "")
 	if err != nil {
 		return err
 	}
 
-	err = lprogram.Parse()
+	err = lprogram.Parse(c.TestConfig.CompileTestBinary)
 	if err != nil {
 		return err
 	}
@@ -359,9 +366,16 @@ func (c *Compiler) Compile(mainPath string) error {
 	}
 	c.builder.CreateRetVoid()
 
+	realMain := c.mod.NamedFunction(c.ir.MainPkg().Pkg.Path() + ".main")
+
+	// Swap the main impl with the TestMain block
+	// TODO: generate a TestMain
+	//l := c.mod.NamedFunction(c.ir.MainPkg().Pkg.Path() + ".TestMain")
+	// TODO: why is this nil?
+	//fmt.Println("DEBUG TestMain: ", l)
+
 	// Conserve for goroutine lowering. Without marking these as external, they
 	// would be optimized away.
-	realMain := c.mod.NamedFunction(c.ir.MainPkg().Pkg.Path() + ".main")
 	realMain.SetLinkage(llvm.ExternalLinkage) // keep alive until goroutine lowering
 	c.mod.NamedFunction("runtime.alloc").SetLinkage(llvm.ExternalLinkage)
 	c.mod.NamedFunction("runtime.free").SetLinkage(llvm.ExternalLinkage)

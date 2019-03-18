@@ -87,6 +87,10 @@ fmt:
 
 test:
 	@go test -v .
+	$(MAKE) tinygo-test
+
+tinygo-test: build/tinygo
+	cd tests/example1 && ../../build/tinygo test
 
 gen-device: gen-device-avr gen-device-nrf gen-device-sam gen-device-stm32
 
