@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/tinygo-org/tinygo/ir"
 	"github.com/tinygo-org/tinygo/loader"
 	"golang.org/x/tools/go/ssa"
@@ -202,7 +203,7 @@ func (c *Compiler) Compile(mainPath string) error {
 		},
 		ShouldOverlay: func(path string) bool {
 			switch path {
-			case "machine", "os", "reflect", "runtime", "sync":
+			case "machine", "os", "reflect", "runtime", "sync", "testing":
 				return true
 			default:
 				if strings.HasPrefix(path, "device/") || strings.HasPrefix(path, "examples/") {
@@ -227,6 +228,7 @@ func (c *Compiler) Compile(mainPath string) error {
 		Dir:    wd,
 		CFlags: c.CFlags,
 	}
+
 	if strings.HasSuffix(mainPath, ".go") {
 		_, err = lprogram.ImportFile(mainPath)
 		if err != nil {
@@ -244,12 +246,28 @@ func (c *Compiler) Compile(mainPath string) error {
 		return err
 	}
 
+	if c.TestConfig.CompileTestBinary {
+		err = lprogram.SwapTestMain(mainPath)
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Println("carolyn was here")
+
 	err = lprogram.Parse(c.TestConfig.CompileTestBinary)
 	if err != nil {
 		return err
 	}
 
+	fmt.Println("carolyn was here 2")
+
 	c.ir = ir.NewProgram(lprogram, mainPath)
+
+	spew.Dump(c.mod.NamedFunction("TestMain"))
+
+	testMain := c.mod.NamedFunction(c.ir.MainPkg().Pkg.Path() + ".TestMain")
+	spew.Dump(testMain)
 
 	// Run a simple dead code elimination pass.
 	c.ir.SimpleDCE()
@@ -313,6 +331,9 @@ func (c *Compiler) Compile(mainPath string) error {
 
 	// Declare all functions.
 	for _, f := range c.ir.Functions {
+		if strings.HasPrefix(f.Name(), "Test") {
+			fmt.Println(f.Name())
+		}
 		frame, err := c.parseFuncDecl(f)
 		if err != nil {
 			return err
@@ -366,16 +387,9 @@ func (c *Compiler) Compile(mainPath string) error {
 	}
 	c.builder.CreateRetVoid()
 
-	realMain := c.mod.NamedFunction(c.ir.MainPkg().Pkg.Path() + ".main")
-
-	// Swap the main impl with the TestMain block
-	// TODO: generate a TestMain
-	//l := c.mod.NamedFunction(c.ir.MainPkg().Pkg.Path() + ".TestMain")
-	// TODO: why is this nil?
-	//fmt.Println("DEBUG TestMain: ", l)
-
 	// Conserve for goroutine lowering. Without marking these as external, they
 	// would be optimized away.
+	realMain := c.mod.NamedFunction(c.ir.MainPkg().Pkg.Path() + ".main")
 	realMain.SetLinkage(llvm.ExternalLinkage) // keep alive until goroutine lowering
 	c.mod.NamedFunction("runtime.alloc").SetLinkage(llvm.ExternalLinkage)
 	c.mod.NamedFunction("runtime.free").SetLinkage(llvm.ExternalLinkage)

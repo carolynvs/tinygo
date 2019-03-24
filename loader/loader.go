@@ -1,7 +1,9 @@
 package loader
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/build"
 	"go/parser"
@@ -14,6 +16,7 @@ import (
 
 // Program holds all packages and some metadata about the program as a whole.
 type Program struct {
+	mainPkg       string
 	Build         *build.Context
 	OverlayBuild  *build.Context
 	ShouldOverlay func(path string) bool
@@ -60,6 +63,10 @@ func (p *Program) Import(path, srcDir string) (*Package, error) {
 	pkg := p.newPackage(buildPkg)
 	p.Packages[buildPkg.ImportPath] = pkg
 
+	if p.mainPkg == "" {
+		p.mainPkg = buildPkg.ImportPath
+	}
+
 	return pkg, nil
 }
 
@@ -89,6 +96,11 @@ func (p *Program) ImportFile(path string) (*Package, error) {
 	p.sorted = nil // invalidate the sorted order of packages
 	pkg := p.newPackage(buildPkg)
 	p.Packages[buildPkg.ImportPath] = pkg
+
+	if p.mainPkg == "" {
+		p.mainPkg = buildPkg.ImportPath
+	}
+
 	return pkg, nil
 }
 
@@ -189,6 +201,8 @@ func (p *Program) Parse(includeTests bool) error {
 		}
 	}
 
+	fmt.Println("carolyn was here 4")
+
 	// Typecheck all packages.
 	for _, pkg := range p.Sorted() {
 		err := pkg.Check()
@@ -196,6 +210,52 @@ func (p *Program) Parse(includeTests bool) error {
 			return err
 		}
 	}
+
+	return nil
+}
+
+func (p *Program) SwapTestMain(mainPath string) error {
+	mainPkg := p.Packages[p.mainPkg]
+
+	for _, f := range mainPkg.Files {
+		for i, d := range f.Decls {
+			switch v := d.(type) {
+			case *ast.FuncDecl:
+				if v.Name.Name == "main" {
+					// Remove main
+					if len(f.Decls) == 1 {
+						//fmt.Println("TODO remove main")
+						f.Decls = make([]ast.Decl, 0)
+
+					} else {
+						//fmt.Printf("TODO: remove just the main declaration at %d \n", i)
+						f.Decls[i] = f.Decls[len(f.Decls)-1]
+						f.Decls = f.Decls[:len(f.Decls)-1]
+					}
+				}
+			}
+		}
+	}
+
+	// TODO: generate a new main all fancy like, but for now assume that they wrote one
+	const mainBody = `package main
+func main () {
+	//TestMain()
+}
+`
+	b := bytes.NewBufferString(mainBody)
+	path := filepath.Join(mainPath, "$testmain.go")
+
+	if p.fset == nil {
+		p.fset = token.NewFileSet()
+	}
+	newMain, err := parser.ParseFile(p.fset, path, b, parser.ParseComments)
+	p.parseFile(path, parser.ParseComments)
+	if err != nil {
+		return err
+	}
+
+	mainPkg.Files = append(mainPkg.Files, newMain)
 
 	return nil
 }
@@ -320,6 +380,7 @@ func (p *Package) parseFiles(includeTests bool) ([]*ast.File, error) {
 	if len(fileErrs) != 0 {
 		return nil, Errors{p, fileErrs}
 	}
+
 	return files, nil
 }
 
