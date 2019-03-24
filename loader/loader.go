@@ -3,7 +3,6 @@ package loader
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"go/ast"
 	"go/build"
 	"go/parser"
@@ -179,7 +178,9 @@ func (p *Program) sort() {
 // The returned error may be an Errors error, which contains a list of errors.
 //
 // Idempotent.
-func (p *Program) Parse(includeTests bool) error {
+func (p *Program) Parse(compileTestBinary bool) error {
+	includeTests := compileTestBinary
+
 	// Load all imports
 	for _, pkg := range p.Sorted() {
 		err := pkg.importRecursively(includeTests)
@@ -201,7 +202,9 @@ func (p *Program) Parse(includeTests bool) error {
 		}
 	}
 
-	fmt.Println("carolyn was here 4")
+	if compileTestBinary {
+		p.SwapTestMain()
+	}
 
 	// Typecheck all packages.
 	for _, pkg := range p.Sorted() {
@@ -214,9 +217,8 @@ func (p *Program) Parse(includeTests bool) error {
 	return nil
 }
 
-func (p *Program) SwapTestMain(mainPath string) error {
+func (p *Program) SwapTestMain() error {
 	mainPkg := p.Packages[p.mainPkg]
-
 	for _, f := range mainPkg.Files {
 		for i, d := range f.Decls {
 			switch v := d.(type) {
@@ -224,11 +226,8 @@ func (p *Program) SwapTestMain(mainPath string) error {
 				if v.Name.Name == "main" {
 					// Remove main
 					if len(f.Decls) == 1 {
-						//fmt.Println("TODO remove main")
 						f.Decls = make([]ast.Decl, 0)
-
 					} else {
-						//fmt.Printf("TODO: remove just the main declaration at %d \n", i)
 						f.Decls[i] = f.Decls[len(f.Decls)-1]
 						f.Decls = f.Decls[:len(f.Decls)-1]
 					}
@@ -240,21 +239,20 @@ func (p *Program) SwapTestMain(mainPath string) error {
 	// TODO: generate a new main all fancy like, but for now assume that they wrote one
 	const mainBody = `package main
 func main () {
-	//TestMain()
+	TestMain()
 }
 `
 	b := bytes.NewBufferString(mainBody)
-	path := filepath.Join(mainPath, "$testmain.go")
+	path := filepath.Join(p.mainPkg, "$testmain.go")
 
 	if p.fset == nil {
 		p.fset = token.NewFileSet()
 	}
+
 	newMain, err := parser.ParseFile(p.fset, path, b, parser.ParseComments)
-	p.parseFile(path, parser.ParseComments)
 	if err != nil {
 		return err
 	}
-
 	mainPkg.Files = append(mainPkg.Files, newMain)
 
 	return nil

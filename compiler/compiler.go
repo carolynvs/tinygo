@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/tinygo-org/tinygo/ir"
 	"github.com/tinygo-org/tinygo/loader"
 	"golang.org/x/tools/go/ssa"
@@ -246,28 +245,12 @@ func (c *Compiler) Compile(mainPath string) error {
 		return err
 	}
 
-	if c.TestConfig.CompileTestBinary {
-		err = lprogram.SwapTestMain(mainPath)
-		if err != nil {
-			return err
-		}
-	}
-
-	fmt.Println("carolyn was here")
-
 	err = lprogram.Parse(c.TestConfig.CompileTestBinary)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("carolyn was here 2")
-
 	c.ir = ir.NewProgram(lprogram, mainPath)
-
-	spew.Dump(c.mod.NamedFunction("TestMain"))
-
-	testMain := c.mod.NamedFunction(c.ir.MainPkg().Pkg.Path() + ".TestMain")
-	spew.Dump(testMain)
 
 	// Run a simple dead code elimination pass.
 	c.ir.SimpleDCE()
